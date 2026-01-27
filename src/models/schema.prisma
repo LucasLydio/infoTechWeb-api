@@ -1,0 +1,98 @@
+// src/models/schema.prisma
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model users {
+  id            String   @id @default(uuid()) @db.Uuid
+  name          String
+  email         String   @unique
+  password_hash String
+  avatar_url    String?
+  created_at    DateTime @default(now())
+
+  topics           topics[]
+  reply_topics     reply_topics[]
+  sent_messages    private_messages[] @relation("MessagesFromUser")
+  receivedMessages private_messages[] @relation("MessagesToUser")
+
+  reply_news reply_news[]
+}
+
+model topics {
+  id         String   @id @default(uuid()) @db.Uuid
+  user_id    String   @db.Uuid
+  title      String
+  body       String
+  created_at DateTime @default(now())
+
+  user         users          @relation(fields: [user_id], references: [id], onDelete: Cascade)
+  reply_topics reply_topics[]
+
+  @@index([user_id])
+  @@index([created_at])
+}
+
+model reply_topics {
+  id         String   @id @default(uuid()) @db.Uuid
+  topic_id   String   @db.Uuid
+  user_id    String   @db.Uuid
+  body       String
+  created_at DateTime @default(now())
+
+  topic topics @relation(fields: [topic_id], references: [id], onDelete: Cascade)
+  user  users  @relation(fields: [user_id], references: [id], onDelete: Cascade)
+
+  @@index([topic_id])
+  @@index([user_id])
+  @@index([created_at])
+}
+
+model private_messages {
+  id           String    @id @default(uuid()) @db.Uuid
+  from_user_id String    @db.Uuid
+  to_user_id   String    @db.Uuid
+  body         String
+  sent_at      DateTime  @default(now())
+  read_at      DateTime?
+
+  from_user users @relation("MessagesFromUser", fields: [from_user_id], references: [id], onDelete: Cascade)
+  to_user   users @relation("MessagesToUser", fields: [to_user_id], references: [id], onDelete: Cascade)
+
+  @@index([from_user_id])
+  @@index([to_user_id])
+  @@index([sent_at])
+}
+
+model news {
+  id         String   @id @default(uuid()) @db.Uuid
+  title      String
+  body       String
+  view       Int      @default(0)
+  like       Int      @default(0)
+  created_at DateTime @default(now())
+
+  reply_news reply_news[]
+
+  @@index([created_at])
+}
+
+model reply_news {
+  id         String   @id @default(uuid()) @db.Uuid
+  news_id    String   @db.Uuid
+  user_id    String   @db.Uuid
+  body       String
+  created_at DateTime @default(now())
+
+  news news  @relation(fields: [news_id], references: [id], onDelete: Cascade)
+  user users @relation(fields: [user_id], references: [id], onDelete: Cascade)
+
+  @@index([news_id])
+  @@index([user_id])
+  @@index([created_at])
+}
