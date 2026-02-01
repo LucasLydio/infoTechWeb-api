@@ -1,24 +1,20 @@
 // src/routes/replyNews.routes.js
-const express = require('express');
-const ReplyNewsController = require('../controllers/replyNews.controller.js');
-const authMiddleware = require('../middlewares/auth.middleware.js');
+const express = require("express");
+const ReplyNewsController = require("../controllers/replyNews.controller.js");
+const authMiddleware = require("../middlewares/auth.middleware.js");
 
 const router = express.Router();
 
-// Todas as rotas exigem usuário logado
 router.use(authMiddleware);
 
-/**
- * Criar resposta para notícia
- * POST /api/news-replies
- * body: { news_id, body }
- */
-router.post('/', ReplyNewsController.create);
 
-/**
- * Rota opcional aninhada
- * POST /api/news-replies/news/:newsId
- */
-router.post('/news/:newsId', ReplyNewsController.create);
+router.post("/", ReplyNewsController.create);
+router.post("/news/:newsId", ReplyNewsController.create);
+
+
+router.put("/:id", ReplyNewsController.update);
+
+
+router.delete("/:id", ReplyNewsController.delete);
 
 module.exports = router;

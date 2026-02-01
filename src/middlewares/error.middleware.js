@@ -5,7 +5,7 @@ function errorMiddleware(err, req, res, next) {
   const statusCode = err.statusCode || 500;
   const message = err.message || 'Erro interno do servidor';
 
-  // Caso seja erro de validação do Yup
+  
   if (err.name === 'ValidationError') {
     return res.status(400).json({
       message: 'Erro de validação',

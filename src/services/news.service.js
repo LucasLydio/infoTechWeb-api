@@ -7,8 +7,16 @@ const {
   bumpCacheVersion,
 } = require("../utils/cache");
 
-const NEWS_LIST_TTL = 60 * 2;   // 2 min
+const NEWS_LIST_TTL = 60 * 2; // 2 min
 const NEWS_DETAIL_TTL = 60 * 2; // 2 min
+const NEWS_ENTITY_TTL = 60 * 5; // 5 min
+
+function clampPagination(page, pageSize) {
+  const p = Math.max(1, parseInt(page, 10) || 1);
+  const sRaw = parseInt(pageSize, 10) || 10;
+  const s = Math.min(Math.max(1, sRaw), 50);
+  return { page: p, pageSize: s };
+}
 
 class NewsService {
   async createNews(data) {
@@ -19,16 +27,32 @@ class NewsService {
       },
     });
 
-    // Invalidate list caches (all pages)
     await bumpCacheVersion("news:list:version");
-
-    // Optional future-proof (detail caches for this item)
     await bumpCacheVersion(`news:detail:${news.id}:version`);
+
+    
+    await setCachedData(
+      `news:entity:${news.id}`,
+      {
+        id: news.id,
+        title: news.title,
+        body: news.body,
+        view: news.view,
+        like: news.like,
+        created_at: news.created_at,
+        updated_at: news.updated_at,
+      },
+      NEWS_ENTITY_TTL
+    );
 
     return news;
   }
 
   async listNews(page = 1, pageSize = 10) {
+    const pg = clampPagination(page, pageSize);
+    page = pg.page;
+    pageSize = pg.pageSize;
+
     const version = await getCacheVersion("news:list:version", "1");
     const key = `news:list:v${version}:p${page}:s${pageSize}`;
 
@@ -43,7 +67,14 @@ class NewsService {
         skip,
         take,
         orderBy: { created_at: "desc" },
-        include: {
+        select: {
+          id: true,
+          title: true,
+          body: true,
+          view: true,
+          like: true,
+          created_at: true,
+          updated_at: true,
           _count: { select: { reply_news: true } },
         },
       }),
@@ -64,8 +95,45 @@ class NewsService {
     return result;
   }
 
+  async getNewsBase(newsId) {
+    const key = `news:entity:${newsId}`;
+
+    let item = await getCachedData(key);
+    if (item) return item;
+
+    item = await prisma.news.findUnique({
+      where: { id: newsId },
+      select: {
+        id: true,
+        title: true,
+        body: true,
+        view: true,
+        like: true,
+        created_at: true,
+        updated_at: true,
+      },
+    });
+
+    if (!item) {
+      const error = new Error("Notícia não encontrada");
+      error.statusCode = 404;
+      throw error;
+    }
+
+    await setCachedData(key, item, NEWS_ENTITY_TTL);
+    return item;
+  }
+
   async getNewsWithReplies(newsId, page = 1, pageSize = 10) {
-    const detailVersion = await getCacheVersion(`news:detail:${newsId}:version`, "1");
+    const pg = clampPagination(page, pageSize);
+    page = pg.page;
+    pageSize = pg.pageSize;
+
+    const detailVersion = await getCacheVersion(
+      `news:detail:${newsId}:version`,
+      "1"
+    );
+
     const key = `news:detail:${newsId}:v${detailVersion}:p${page}:s${pageSize}`;
 
     let result = await getCachedData(key);
@@ -74,23 +142,21 @@ class NewsService {
     const skip = (page - 1) * pageSize;
     const take = pageSize;
 
-    const newsItem = await prisma.news.findUnique({
+    
+    const updatedForView = await prisma.news.update({
       where: { id: newsId },
-    });
-
-    if (!newsItem) {
-      const error = new Error("Notícia não encontrada");
-      error.statusCode = 404;
-      throw error;
-    }
-
-    // Increment view ONLY when cache miss (otherwise caching would block view increments)
-    await prisma.news.update({
-      where: { id: newsId },
-      data: {
-        view: { increment: 1 },
+      data: { view: { increment: 1 } },
+      select: {
+        id: true,
+        title: true,
+        body: true,
+        view: true,
+        like: true,
+        created_at: true,
       },
     });
+
+    await setCachedData(`news:entity:${newsId}`, updatedForView, NEWS_ENTITY_TTL);
 
     const [replies, totalReplies] = await Promise.all([
       prisma.reply_news.findMany({
@@ -98,7 +164,11 @@ class NewsService {
         skip,
         take,
         orderBy: { created_at: "asc" },
-        include: {
+        select: {
+          id: true,
+          news_id: true,
+          body: true,
+          created_at: true,
           user: { select: { id: true, name: true, avatar_url: true } },
         },
       }),
@@ -106,7 +176,7 @@ class NewsService {
     ]);
 
     result = {
-      news: newsItem,
+      news: updatedForView, 
       replies,
       repliesPagination: {
         page,
@@ -116,11 +186,8 @@ class NewsService {
       },
     };
 
-    await setCachedData(key, result, NEWS_DETAIL_TTL);
-
-    // Since view changed in DB, bump detail version so next request uses a new key
-    // (prevents serving stale "view" values for long)
-    await bumpCacheVersion(`news:detail:${newsId}:version`);
+    const ttl = page === 1 ? NEWS_DETAIL_TTL : 30;
+    await setCachedData(key, result, ttl);
 
     return result;
   }
@@ -128,18 +195,30 @@ class NewsService {
   async likeNews(newsId) {
     const newsItem = await prisma.news.update({
       where: { id: newsId },
-      data: {
-        like: { increment: 1 },
+      data: { like: { increment: 1 } },
+      select: {
+        id: true,
+        title: true,
+        body: true,
+        view: true,
+        like: true,
+        created_at: true,
       },
     });
 
-    // Invalidate this news detail caches (likes changed)
     await bumpCacheVersion(`news:detail:${newsId}:version`);
-
-    // Also invalidates list pages if you show likes there
     await bumpCacheVersion("news:list:version");
 
+    
+    await setCachedData(`news:entity:${newsId}`, newsItem, NEWS_ENTITY_TTL);
+
     return newsItem;
+  }
+
+  
+  async invalidateNews(newsId) {
+    await bumpCacheVersion("news:list:version");
+    await bumpCacheVersion(`news:detail:${newsId}:version`);
   }
 }
 

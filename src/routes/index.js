@@ -15,6 +15,5 @@ router.use('/reply-topics', replyTopics);
 router.use('/messages', messageRoutes);
 router.use('/news', newsRoutes);
 router.use('/reply-news', replyNewsRoutes);
-// router.use('/news-replies', replyNewsRoutes);
 
 module.exports = router;
