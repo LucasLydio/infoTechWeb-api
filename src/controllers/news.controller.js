@@ -3,6 +3,7 @@ const NewsService = require("../services/news.service.js");
 const validateSchema = require("../validators/validate.js");
 const { CreateNewsDTO } = require("../validators/news.validators.js");
 const async = require("../utils/async");
+const { ok, created } = require("../utils/response");
 
 function parsePagination(query) {
   const page = Math.max(1, parseInt(query.page, 10) || 1);
@@ -15,13 +16,16 @@ class NewsController {
   create = async(async (req, res) => {
     const payload = await validateSchema(CreateNewsDTO, req.body);
     const news = await NewsService.createNews(payload);
-    return res.status(201).json(news);
+
+    return created(res, news, undefined, "Notícia criada com sucesso");
   });
 
   list = async(async (req, res) => {
     const { page, pageSize } = parsePagination(req.query);
     const result = await NewsService.listNews(page, pageSize);
-    return res.json(result);
+
+    // result = { data, pagination }
+    return ok(res, result.data, { pagination: result.pagination });
   });
 
   getById = async(async (req, res) => {
@@ -35,7 +39,17 @@ class NewsController {
 
     const { page, pageSize } = parsePagination(req.query);
     const result = await NewsService.getNewsWithReplies(id, page, pageSize);
-    return res.json(result);
+
+    return ok(
+      res,
+      {
+        news: result.news,
+        replies: result.replies,
+      },
+      {
+        repliesPagination: result.repliesPagination,
+      }
+    );
   });
 
   like = async(async (req, res) => {
@@ -48,7 +62,8 @@ class NewsController {
     }
 
     const updated = await NewsService.likeNews(id);
-    return res.json(updated);
+
+    return ok(res, updated, undefined, "Like adicionado");
   });
 }
 

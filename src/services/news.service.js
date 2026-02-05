@@ -25,25 +25,20 @@ class NewsService {
         title: data.title,
         body: data.body,
       },
+      select: {
+        id: true,
+        title: true,
+        body: true,
+        view: true,
+        like: true,
+        created_at: true,
+      },
     });
 
     await bumpCacheVersion("news:list:version");
     await bumpCacheVersion(`news:detail:${news.id}:version`);
 
-    
-    await setCachedData(
-      `news:entity:${news.id}`,
-      {
-        id: news.id,
-        title: news.title,
-        body: news.body,
-        view: news.view,
-        like: news.like,
-        created_at: news.created_at,
-        updated_at: news.updated_at,
-      },
-      NEWS_ENTITY_TTL
-    );
+    await setCachedData(`news:entity:${news.id}`, news, NEWS_ENTITY_TTL);
 
     return news;
   }
@@ -56,13 +51,13 @@ class NewsService {
     const version = await getCacheVersion("news:list:version", "1");
     const key = `news:list:v${version}:p${page}:s${pageSize}`;
 
-    let result = await getCachedData(key);
-    if (result) return result;
+    const cached = await getCachedData(key);
+    if (cached) return cached;
 
     const skip = (page - 1) * pageSize;
     const take = pageSize;
 
-    const [items, total] = await Promise.all([
+    const [rows, total] = await Promise.all([
       prisma.news.findMany({
         skip,
         take,
@@ -70,19 +65,29 @@ class NewsService {
         select: {
           id: true,
           title: true,
-          body: true,
+          body: true, 
           view: true,
           like: true,
           created_at: true,
-          updated_at: true,
           _count: { select: { reply_news: true } },
         },
       }),
       prisma.news.count(),
     ]);
 
-    result = {
-      data: items,
+    
+    const data = rows.map((n) => ({
+      id: n.id,
+      title: n.title,
+      body: n.body,
+      view: n.view,
+      like: n.like,
+      created_at: n.created_at,
+      repliesCount: n._count.reply_news,
+    }));
+
+    const result = {
+      data,
       pagination: {
         page,
         pageSize,
@@ -98,10 +103,10 @@ class NewsService {
   async getNewsBase(newsId) {
     const key = `news:entity:${newsId}`;
 
-    let item = await getCachedData(key);
-    if (item) return item;
+    const cached = await getCachedData(key);
+    if (cached) return cached;
 
-    item = await prisma.news.findUnique({
+    const item = await prisma.news.findUnique({
       where: { id: newsId },
       select: {
         id: true,
@@ -110,7 +115,6 @@ class NewsService {
         view: true,
         like: true,
         created_at: true,
-        updated_at: true,
       },
     });
 
@@ -129,20 +133,26 @@ class NewsService {
     page = pg.page;
     pageSize = pg.pageSize;
 
-    const detailVersion = await getCacheVersion(
-      `news:detail:${newsId}:version`,
-      "1"
-    );
-
+    const detailVersion = await getCacheVersion(`news:detail:${newsId}:version`, "1");
     const key = `news:detail:${newsId}:v${detailVersion}:p${page}:s${pageSize}`;
 
-    let result = await getCachedData(key);
-    if (result) return result;
+    const cached = await getCachedData(key);
+    if (cached) return cached;
 
     const skip = (page - 1) * pageSize;
     const take = pageSize;
 
-    
+    const exists = await prisma.news.findUnique({
+      where: { id: newsId },
+      select: { id: true },
+    });
+
+    if (!exists) {
+      const error = new Error("Notícia não encontrada");
+      error.statusCode = 404;
+      throw error;
+    }
+
     const updatedForView = await prisma.news.update({
       where: { id: newsId },
       data: { view: { increment: 1 } },
@@ -175,8 +185,8 @@ class NewsService {
       prisma.reply_news.count({ where: { news_id: newsId } }),
     ]);
 
-    result = {
-      news: updatedForView, 
+    const result = {
+      news: updatedForView,
       replies,
       repliesPagination: {
         page,
@@ -191,6 +201,7 @@ class NewsService {
 
     return result;
   }
+
 
   async likeNews(newsId) {
     const newsItem = await prisma.news.update({
@@ -208,14 +219,11 @@ class NewsService {
 
     await bumpCacheVersion(`news:detail:${newsId}:version`);
     await bumpCacheVersion("news:list:version");
-
-    
     await setCachedData(`news:entity:${newsId}`, newsItem, NEWS_ENTITY_TTL);
 
     return newsItem;
   }
 
-  
   async invalidateNews(newsId) {
     await bumpCacheVersion("news:list:version");
     await bumpCacheVersion(`news:detail:${newsId}:version`);

@@ -1,3 +1,4 @@
+// src/services/user.service.js
 const prisma = require("../config/database.js");
 const { hashPassword, comparePassword } = require("../utils/password");
 const { generateToken } = require("../utils/jwt");
@@ -12,10 +13,28 @@ const {
 const PROFILE_TTL = 60 * 5; // 5 min
 const USERS_LIST_TTL = 60 * 2; // 2 min
 
+function clampPagination(page, pageSize) {
+  const p = Math.max(1, parseInt(page, 10) || 1);
+  const sRaw = parseInt(pageSize, 10) || 10;
+  const s = Math.min(Math.max(1, sRaw), 50);
+  return { page: p, pageSize: s };
+}
+
+function toProfileShape(u) {
+  return {
+    id: u.id,
+    name: u.name,
+    email: u.email,
+    avatar_url: u.avatar_url ?? null,
+    created_at: u.created_at,
+  };
+}
+
 class UserService {
   async register(data) {
     const existing = await prisma.users.findUnique({
       where: { email: data.email },
+      select: { id: true },
     });
 
     if (existing) {
@@ -33,15 +52,21 @@ class UserService {
         password_hash,
         avatar_url: data.avatar_url || null,
       },
+      select: {
+        id: true,
+        name: true,
+        email: true,
+        avatar_url: true,
+        created_at: true,
+      },
     });
 
-    const { password_hash: _, ...safeUser } = user;
+    const profile = toProfileShape(user);
 
-
-    await setCachedData(`users:profile:${safeUser.id}`, safeUser, PROFILE_TTL);
+    await setCachedData(`users:profile:${profile.id}`, profile, PROFILE_TTL);
     await bumpCacheVersion("users:list:version");
 
-    return safeUser;
+    return profile;
   }
 
   async login(email, password) {
@@ -64,21 +89,21 @@ class UserService {
     }
 
     const token = generateToken({ id: user.id, name: user.name, email: user.email });
-    const { password_hash: _, ...safeUser } = user;
 
+    const profile = toProfileShape(user);
 
-    await setCachedData(`users:profile:${safeUser.id}`, safeUser, PROFILE_TTL);
+    await setCachedData(`users:profile:${profile.id}`, profile, PROFILE_TTL);
 
-    return { token, user: safeUser };
+    return { token, user: profile };
   }
 
   async getProfile(userId) {
     const key = `users:profile:${userId}`;
 
-    let user = await getCachedData(key);
-    if (user) return user;
+    const cached = await getCachedData(key);
+    if (cached) return cached;
 
-    user = await prisma.users.findUnique({
+    const user = await prisma.users.findUnique({
       where: { id: userId },
       select: {
         id: true,
@@ -100,11 +125,15 @@ class UserService {
   }
 
   async listUsers(page = 1, pageSize = 10) {
+    const pg = clampPagination(page, pageSize);
+    page = pg.page;
+    pageSize = pg.pageSize;
+
     const version = await getCacheVersion("users:list:version", "1");
     const key = `users:list:v${version}:p${page}:s${pageSize}`;
 
-    let users = await getCachedData(key);
-    if (users) return users;
+    const cached = await getCachedData(key);
+    if (cached) return cached;
 
     const skip = (page - 1) * pageSize;
     const take = pageSize;
@@ -125,7 +154,7 @@ class UserService {
       prisma.users.count(),
     ]);
 
-    users = {
+    const result = {
       data,
       pagination: {
         page,
@@ -135,10 +164,9 @@ class UserService {
       },
     };
 
-    await setCachedData(key, users, USERS_LIST_TTL);
-    return users;
+    await setCachedData(key, result, USERS_LIST_TTL);
+    return result;
   }
-
 
   async updateProfile(userId, payload) {
     const updated = await prisma.users.update({

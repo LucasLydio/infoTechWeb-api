@@ -7,14 +7,14 @@ const {
   bumpCacheVersion,
 } = require("../utils/cache");
 
-const TOPICS_LIST_TTL = 60 * 2; // 2 min
-const TOPIC_DETAIL_TTL = 60 * 2; // 2 min
-const TOPIC_ENTITY_TTL = 60 * 5; // 5 min (topic basic info)
+const TOPICS_LIST_TTL = 60 * 2;
+const TOPIC_DETAIL_TTL = 60 * 2;
+const TOPIC_ENTITY_TTL = 60 * 5;
 
 function clampPagination(page, pageSize) {
   const p = Math.max(1, parseInt(page, 10) || 1);
   const sRaw = parseInt(pageSize, 10) || 10;
-  const s = Math.min(Math.max(1, sRaw), 50); // cap
+  const s = Math.min(Math.max(1, sRaw), 50);
   return { page: p, pageSize: s };
 }
 
@@ -29,22 +29,9 @@ class TopicService {
     });
 
     await bumpCacheVersion("topics:list:version");
-
     await bumpCacheVersion(`topics:detail:${topic.id}:version`);
 
-    
-    await setCachedData(
-      `topics:entity:${topic.id}`,
-      {
-        id: topic.id,
-        user_id: topic.user_id,
-        title: topic.title,
-        body: topic.body,
-        created_at: topic.created_at,
-      },
-      TOPIC_ENTITY_TTL
-    );
-
+    // ✅ Don't warm topics:entity here (it would miss "user" shape)
     return topic;
   }
 
@@ -56,8 +43,8 @@ class TopicService {
     const version = await getCacheVersion("topics:list:version", "1");
     const key = `topics:list:v${version}:p${page}:s${pageSize}`;
 
-    let result = await getCachedData(key);
-    if (result) return result;
+    const cached = await getCachedData(key);
+    if (cached) return cached;
 
     const skip = (page - 1) * pageSize;
     const take = pageSize;
@@ -69,22 +56,27 @@ class TopicService {
         select: {
           id: true,
           title: true,
-          body: true,
+          body: true, // (optional to remove later)
           created_at: true,
-          user: {
-            select: { id: true, name: true, avatar_url: true },
-          },
-          _count: {
-            select: { reply_topics: true },
-          },
+          user: { select: { id: true, name: true, avatar_url: true } },
+          _count: { select: { reply_topics: true } },
         },
         orderBy: { created_at: "desc" },
       }),
       prisma.topics.count(),
     ]);
 
-    result = {
-      data: topics,
+    const items = topics.map((t) => ({
+      id: t.id,
+      title: t.title,
+      body: t.body,
+      created_at: t.created_at,
+      user: t.user,
+      repliesCount: t._count.reply_topics,
+    }));
+
+    const result = {
+      items,
       pagination: {
         page,
         pageSize,
@@ -100,10 +92,10 @@ class TopicService {
   async getTopicBase(topicId) {
     const key = `topics:entity:${topicId}`;
 
-    let topic = await getCachedData(key);
-    if (topic) return topic;
+    const cached = await getCachedData(key);
+    if (cached) return cached;
 
-    topic = await prisma.topics.findUnique({
+    const topic = await prisma.topics.findUnique({
       where: { id: topicId },
       select: {
         id: true,
@@ -136,16 +128,15 @@ class TopicService {
 
     const key = `topics:detail:${topicId}:v${detailVersion}:p${page}:s${pageSize}`;
 
-    let result = await getCachedData(key);
-    if (result) return result;
+    const cached = await getCachedData(key);
+    if (cached) return cached;
 
     const skip = (page - 1) * pageSize;
     const take = pageSize;
 
-   
     const topic = await this.getTopicBase(topicId);
 
-    const [reply_topics, totalReplyTopics] = await Promise.all([
+    const [replies, totalReplies] = await Promise.all([
       prisma.reply_topics.findMany({
         where: { topic_id: topicId },
         skip,
@@ -162,25 +153,23 @@ class TopicService {
       prisma.reply_topics.count({ where: { topic_id: topicId } }),
     ]);
 
-    result = {
+    const result = {
       topic,
-      reply_topics,
-      replyTopicsPagination: {
+      replies,
+      repliesPagination: {
         page,
         pageSize,
-        total: totalReplyTopics,
-        totalPages: Math.ceil(totalReplyTopics / pageSize),
+        total: totalReplies,
+        totalPages: Math.ceil(totalReplies / pageSize),
       },
     };
 
-    
     const ttl = page === 1 ? TOPIC_DETAIL_TTL : 30;
     await setCachedData(key, result, ttl);
 
     return result;
   }
 
-  
   async invalidateTopic(topicId) {
     await bumpCacheVersion("topics:list:version");
     await bumpCacheVersion(`topics:detail:${topicId}:version`);

@@ -1,3 +1,4 @@
+// src/utils/redis.js
 const { createClient } = require("redis");
 
 let client;
@@ -22,14 +23,13 @@ function getRedis() {
     throw err;
   });
 
-  console.log('Redis is On!!')
-
   return client;
 }
 
 async function ensureRedis() {
   const c = getRedis();
   if (connectPromise) await connectPromise;
+
   return c;
 }
 

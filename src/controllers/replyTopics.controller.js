@@ -7,6 +7,7 @@ const {
   DeleteReplyTopicDTO,
 } = require("../validators/replyTopics.validator");
 const async = require("../utils/async");
+const { ok, created } = require("../utils/response");
 
 function requireId(value, name) {
   if (!value || typeof value !== "string") {
@@ -19,19 +20,15 @@ function requireId(value, name) {
 
 class ReplyTopicsController {
   list = async(async (req, res) => {
-    const topic_id = req.params.topic_id || req.params.topicId;
+    const topic_id = req.params.topic_id;
     requireId(topic_id, "topic_id");
 
-    // validate uuid format (optional but useful)
-    await validateSchema(CreateReplyTopicDTO.pick(["topic_id"]), { topic_id });
-    // ^ if you prefer not using pick, you can remove this line
-
     const replies = await ReplyTopicsService.getByTopicId(topic_id);
-    return res.json(replies);
+    return ok(res, replies);
   });
 
   create = async(async (req, res) => {
-    const topic_id = req.body.topic_id || req.params.topic_id || req.params.topicId;
+    const topic_id = req.params.topic_id;
     requireId(topic_id, "topic_id");
 
     const payload = await validateSchema(CreateReplyTopicDTO, {
@@ -40,27 +37,28 @@ class ReplyTopicsController {
     });
 
     const reply = await ReplyTopicsService.createReply(req.user.id, payload);
-    return res.status(201).json(reply);
+
+    return created(res, reply, undefined, "Resposta criada com sucesso");
   });
 
   update = async(async (req, res) => {
-    const id = req.params.id || req.body.id;
+    const id = req.params.id;
     requireId(id, "id");
 
     const payload = await validateSchema(UpdateReplyTopicDTO, req.body);
     const updated = await ReplyTopicsService.updateReply(req.user.id, id, payload);
 
-    return res.json(updated);
+    return ok(res, updated, undefined, "Resposta atualizada com sucesso");
   });
 
   delete = async(async (req, res) => {
-    const id = req.params.id || req.body.id;
+    const id = req.params.id;
     requireId(id, "id");
 
     await validateSchema(DeleteReplyTopicDTO, { id });
     const result = await ReplyTopicsService.deleteReply(req.user.id, id);
 
-    return res.json(result);
+    return ok(res, result, undefined, "Resposta removida com sucesso");
   });
 }
 

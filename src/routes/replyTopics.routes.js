@@ -8,15 +8,9 @@ const router = express.Router();
 
 router.get("/topic/:topic_id", replyTopicsController.list);
 
-
-router.post("/", authMiddleware, replyTopicsController.create);
-
-
-router.post("/topic/:topicId", authMiddleware, replyTopicsController.create);
-
+router.post("/topic/:topic_id", authMiddleware, replyTopicsController.create);
 
 router.put("/:id", authMiddleware, replyTopicsController.update);
-
 
 router.delete("/:id", authMiddleware, replyTopicsController.delete);
 

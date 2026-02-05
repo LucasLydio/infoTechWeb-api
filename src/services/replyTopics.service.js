@@ -23,7 +23,6 @@ class ReplyTopicsService {
         topic_id: true,
         body: true,
         created_at: true,
-        updated_at: true,
         user: {
           select: { id: true, name: true, avatar_url: true },
         },
@@ -57,7 +56,6 @@ class ReplyTopicsService {
         topic_id: true,
         body: true,
         created_at: true,
-        updated_at: true,
         user: { select: { id: true, name: true, avatar_url: true } },
       },
     });
@@ -68,7 +66,7 @@ class ReplyTopicsService {
     return reply;
   }
 
-  // ✅ Update (only owner can update)
+  
   async updateReply(userId, replyId, data) {
     const existing = await prisma.reply_topics.findUnique({
       where: { id: replyId },
@@ -86,7 +84,6 @@ class ReplyTopicsService {
         topic_id: true,
         body: true,
         created_at: true,
-        updated_at: true,
         user: { select: { id: true, name: true, avatar_url: true } },
       },
     });
@@ -97,7 +94,7 @@ class ReplyTopicsService {
     return updated;
   }
 
-  // ✅ Delete (only owner can delete)
+  
   async deleteReply(userId, replyId) {
     const existing = await prisma.reply_topics.findUnique({
       where: { id: replyId },
